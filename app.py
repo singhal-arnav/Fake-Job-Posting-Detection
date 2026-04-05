@@ -1,5 +1,4 @@
 import streamlit as st
-import pandas as pd
 import joblib
 import plotly.express as px
 import re
@@ -31,7 +30,6 @@ def clean_text(text):
     return text
 
 # --- LOAD ALL PIPELINES ---
-# fake_job_models.pkl is a dict: {model_name: sklearn Pipeline (tfidf + clf)}
 @st.cache_resource
 def load_all_pipelines():
     try:
@@ -41,7 +39,6 @@ def load_all_pipelines():
 
 all_pipelines = load_all_pipelines()
 
-# Model descriptions shown beneath the selectbox
 MODEL_INFO = {
     "Naive Bayes": "Fast and memory-efficient. Strong recall but tends to over-flag real postings.",
     "Logistic Regression": "Best overall F1. Interpretable coefficients and well-calibrated probabilities.",
@@ -52,7 +49,6 @@ MODEL_INFO = {
 with st.sidebar:
     st.header("🔍 Analysis Portal")
 
-    # Model selector — only shown when pipelines loaded successfully
     if all_pipelines:
         available_models = list(all_pipelines.keys())
         selected_model = st.selectbox(
@@ -68,15 +64,20 @@ with st.sidebar:
 
     st.divider()
 
+    # Updated Input Fields to match training columns
     job_title = st.text_input("Job Title")
-    location = st.text_input("Location")
-    description = st.text_area("Job Description", height=300)
+    company_profile = st.text_area("Company Profile", height=150)
+    description = st.text_area("Job Description", height=250)
+    requirements = st.text_area("Requirements", height=150)
+    benefits = st.text_area("Benefits", height=100)
 
-    # INPUT VALIDATION: Word Count Check
-    word_count = len(re.findall(r'\w+', description))
+    # INPUT VALIDATION: Combined Word Count Check
+    # We join them with spaces to check total content length
+    raw_combined = f"{job_title} {company_profile} {description} {requirements} {benefits}"
+    word_count = len(re.findall(r'\w+', raw_combined))
 
     if word_count < 20:
-        st.warning(f"⚠️ Minimum 20 words required. Current: {word_count}")
+        st.warning(f"⚠️ Minimum 20 words across all fields required. Current: {word_count}")
         analyze_btn = st.button("RUN FULL PIPELINE", disabled=True)
     else:
         st.success(f"✅ Length sufficient: {word_count} words")
@@ -87,22 +88,24 @@ st.title("🛡️ Fake Job Posting Detection System")
 
 if analyze_btn:
     if all_pipelines is None:
-        st.error("Backend Error: 'fake_job_models.pkl' not found. Run the notebook or fake_job_models.py first.")
+        st.error("Backend Error: 'fake_job_models.pkl' not found.")
     else:
         pipeline = all_pipelines[selected_model]
 
-        full_text = f"{job_title} {location} {description}"
+        # Build full_text exactly as training did: " ".join([title, company_profile, description, requirements, benefits])
+        # Using a list join ensures consistency with the training lambda logic
+        input_list = [job_title, company_profile, description, requirements, benefits]
+        full_text = " ".join([str(i) if i else "" for i in input_list])
+        
         cleaned_text = clean_text(full_text)
 
-        # ELEGANT ERROR HANDLING: Check for Out-of-Vocabulary (Gibberish)
-        # We check if the TF-IDF step results in a completely empty vector.
+        # Check for Out-of-Vocabulary
         vectorizer = pipeline.named_steps['tfidf']
         transformed_text = vectorizer.transform([cleaned_text])
 
-        if transformed_text.nnz < 20:
-            st.error("🚨 **Analysis Failed:** The text entered does not contain enough recognizable vocabulary found in standard job descriptions. Please provide more specific details.")
+        if transformed_text.nnz < 10: # Adjusted slightly as real words are now spread across fields
+            st.error("🚨 **Analysis Failed:** Not enough recognizable vocabulary. Please provide more specific details.")
         else:
-            # Pass raw cleaned text — the pipeline handles vectorisation internally.
             prediction = pipeline.predict([cleaned_text])[0]
             probs = pipeline.predict_proba([cleaned_text])[0]
 
