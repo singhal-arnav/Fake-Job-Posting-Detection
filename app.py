@@ -30,27 +30,51 @@ def clean_text(text):
     text = re.sub(r"\s+", " ", text).strip()    # collapse whitespace
     return text
 
-# --- LOAD THE FULL PIPELINE ---
+# --- LOAD ALL PIPELINES ---
+# fake_job_models.pkl is a dict: {model_name: sklearn Pipeline (tfidf + clf)}
 @st.cache_resource
-def load_backend():
+def load_all_pipelines():
     try:
-        return joblib.load('fake_job_model.pkl')
-    except:
+        return joblib.load('fake_job_models.pkl')
+    except Exception:
         return None
 
-backend_pipeline = load_backend()
+all_pipelines = load_all_pipelines()
+
+# Model descriptions shown beneath the selectbox
+MODEL_INFO = {
+    "Naive Bayes": "Fast and memory-efficient. Strong recall but tends to over-flag real postings.",
+    "Logistic Regression": "Best overall F1. Interpretable coefficients and well-calibrated probabilities.",
+    "Random Forest": "Ensemble model. Captures non-linear patterns; slower but robust.",
+}
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("🔍 Analysis Portal")
-    st.info("Using the Multinomial Naive Bayes Engine (98.3% Accuracy)")
+
+    # Model selector — only shown when pipelines loaded successfully
+    if all_pipelines:
+        available_models = list(all_pipelines.keys())
+        selected_model = st.selectbox(
+            "Select Model",
+            options=available_models,
+            index=available_models.index("Logistic Regression")
+                  if "Logistic Regression" in available_models else 0,
+        )
+        st.caption(MODEL_INFO.get(selected_model, ""))
+    else:
+        selected_model = None
+        st.error("fake_job_models.pkl not found. Run the notebook or fake_job_models.py first.")
+
+    st.divider()
+
     job_title = st.text_input("Job Title")
     location = st.text_input("Location")
     description = st.text_area("Job Description", height=300)
-    
-    # 1. INPUT VALIDATION: Word Count Check
+
+    # INPUT VALIDATION: Word Count Check
     word_count = len(re.findall(r'\w+', description))
-    
+
     if word_count < 20:
         st.warning(f"⚠️ Minimum 20 words required. Current: {word_count}")
         analyze_btn = st.button("RUN FULL PIPELINE", disabled=True)
@@ -62,42 +86,47 @@ with st.sidebar:
 st.title("🛡️ Fake Job Posting Detection System")
 
 if analyze_btn:
-    if backend_pipeline is None:
-        st.error("Backend Error: 'fake_job_model.pkl' not found. Run the notebook first.")
+    if all_pipelines is None:
+        st.error("Backend Error: 'fake_job_models.pkl' not found. Run the notebook or fake_job_models.py first.")
     else:
+        pipeline = all_pipelines[selected_model]
+
         full_text = f"{job_title} {location} {description}"
         cleaned_text = clean_text(full_text)
-        
-        # 3. ELEGANT ERROR HANDLING: Check for Out-of-Vocabulary (Gibberish)
-        # We check if the TF-IDF transform results in a completely empty vector
-        vectorizer = backend_pipeline.named_steps['tfidf']
+
+        # ELEGANT ERROR HANDLING: Check for Out-of-Vocabulary (Gibberish)
+        # We check if the TF-IDF step results in a completely empty vector.
+        vectorizer = pipeline.named_steps['tfidf']
         transformed_text = vectorizer.transform([cleaned_text])
-        
+
         if transformed_text.nnz < 20:
             st.error("🚨 **Analysis Failed:** The text entered does not contain enough recognizable vocabulary found in standard job descriptions. Please provide more specific details.")
         else:
-            # 2. DISPLAY CONFIDENCE SCORES
-            prediction = backend_pipeline.predict([transformed_text])[0]
-            probs = backend_pipeline.predict_proba([transformed_text])[0]
+            # Pass raw cleaned text — the pipeline handles vectorisation internally.
+            prediction = pipeline.predict([cleaned_text])[0]
+            probs = pipeline.predict_proba([cleaned_text])[0]
 
             col1, col2 = st.columns(2)
             with col1:
                 st.subheader("System Verdict")
+                st.caption(f"Model: **{selected_model}**")
                 if prediction == 1:
-                    st.error(f"### ⚠️ FRAUDULENT")
-                    # Using a progress bar to visually represent risk
+                    st.error("### ⚠️ FRAUDULENT")
                     st.write(f"**Risk Level:** {probs[1]*100:.1f}%")
-                    st.progress(probs[1]) 
+                    st.progress(probs[1])
                 else:
-                    st.success(f"### ✅ LEGITIMATE")
+                    st.success("### ✅ LEGITIMATE")
                     st.write(f"**Legitimacy Confidence:** {probs[0]*100:.1f}%")
                     st.progress(probs[0])
-            
+
             with col2:
                 st.subheader("Statistical Breakdown")
-                fig = px.pie(values=probs, names=['Legit', 'Fraud'], 
-                             color_discrete_sequence=['#4CAF50', '#FF4B4B'],
-                             hole=0.4) # Donut chart for professional look
+                fig = px.pie(
+                    values=probs,
+                    names=['Legit', 'Fraud'],
+                    color_discrete_sequence=['#4CAF50', '#FF4B4B'],
+                    hole=0.4,
+                )
                 st.plotly_chart(fig, use_container_width=True)
 
 elif word_count == 0:

@@ -297,3 +297,19 @@ if __name__ == "__main__":
         plt.tight_layout()
         plt.savefig("feature_importance.png", dpi=150)
         plt.show()
+
+    # ── STEP 15: EXPORT ALL PIPELINES ─────────────────────────────────────────────
+    # Each model is bundled with the fitted TF-IDF vectoriser into a self-contained
+    # sklearn Pipeline (raw text in → prediction out) and saved together in a single
+    # pickle file so the Streamlit app can offer a per-model selection at runtime.
+
+    import joblib
+
+    all_pipelines = {
+        name: Pipeline([("tfidf", tfidf), ("clf", model)])
+        for name, model in trained_models.items()
+    }
+
+    joblib.dump(all_pipelines, "fake_job_models.pkl")
+    print("\nSaved fake_job_models.pkl")
+    print("  Pipelines exported:", list(all_pipelines.keys()))
